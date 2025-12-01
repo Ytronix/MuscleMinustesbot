@@ -79,7 +79,14 @@ bot.onText(/\/mystats/, (msg) => {
   const user = msg.from.id;
   const name = msg.from.first_name;
 
-  const mins = data[user]?.total || 0;
+  let mins = data[user]?.total || 0;
+
+  // If user has started but not stopped, include current session
+  if (data[user]?.start) {
+    const durationMs = Date.now() - data[user].start;
+    mins += Math.floor(durationMs / 60000);
+  }
+
   const hrs = Math.floor(mins / 60);
   const leftMins = mins % 60;
 
@@ -94,14 +101,22 @@ bot.onText(/\/groupstats/, async (msg) => {
     let user = await bot.getChatMember(msg.chat.id, id).catch(() => null);
     if (!user) continue;
 
-    const mins = data[id].total;
+    let mins = data[id].total;
+
+    // Include in-progress session
+    if (data[id].start) {
+      mins += Math.floor((Date.now() - data[id].start) / 60000);
+    }
+
     const hrs = Math.floor(mins / 60);
     const leftMins = mins % 60;
 
     reply += `👤 ${user.user.first_name}: ${hrs} hr ${leftMins} min\n`;
   }
+
   bot.sendMessage(msg.chat.id, reply);
 });
+
 
 // ---- EXPRESS SERVER (Render keeps bot alive) ----
 const app = express();
@@ -160,3 +175,4 @@ setInterval(() => {
     bot.sendMessage(GROUP_ID, board);
   }
 }, 60000);
+
