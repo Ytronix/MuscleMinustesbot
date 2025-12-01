@@ -1,13 +1,18 @@
+// MuscleMinutesBot – Full Version
 const TelegramBot = require("node-telegram-bot-api");
 const fs = require("fs");
 const express = require("express");
 
-// ENV TOKEN (Render will pass this)
+// Get your token from Render environment variables
 const TOKEN = process.env.TOKEN;
 const bot = new TelegramBot(TOKEN, { polling: true });
 
+// Your supergroup ID here
+const GROUP_ID = -1003381639418; // Replace with your actual group ID
+
 let data = {};
 
+// ---- Data Persistence ----
 function saveData() {
   fs.writeFileSync("timedata.json", JSON.stringify(data, null, 2));
 }
@@ -19,7 +24,7 @@ function loadData() {
 }
 loadData();
 
-// Set bot commands
+// ---- Bot Commands ----
 bot.setMyCommands([
   { command: "start", description: "Start your training timer" },
   { command: "stop", description: "Stop your training timer" },
@@ -32,9 +37,10 @@ bot.onText(/\/start/, (msg) => {
   const user = msg.from.id;
   const name = msg.from.first_name;
 
-  if (!data[user]) data[user] = { total: 0, start: null, week: 0 };
+  if (!data[user]) data[user] = { total: 0, start: null, week: 0, lastTrained: null, name };
 
   data[user].start = Date.now();
+  data[user].name = name; // save name for reminders
   saveData();
 
   bot.sendMessage(msg.chat.id, `⏱ Timer started for ${name}!`);
@@ -57,6 +63,9 @@ bot.onText(/\/stop/, (msg) => {
   data[user].total += mins;
   data[user].week += mins;
   data[user].start = null;
+
+  // Save last trained date for daily reminder
+  data[user].lastTrained = new Date().toLocaleDateString();
   saveData();
 
   bot.sendMessage(
@@ -94,7 +103,7 @@ bot.onText(/\/groupstats/, async (msg) => {
   bot.sendMessage(msg.chat.id, reply);
 });
 
-// ---- EXPRESS SERVER (IMPORTANT FOR RENDER) ----
+// ---- EXPRESS SERVER (Render keeps bot alive) ----
 const app = express();
 
 app.get("/", (req, res) => {
@@ -104,3 +113,50 @@ app.get("/", (req, res) => {
 app.listen(3000, () => {
   console.log("Server running on port 3000");
 });
+
+// ---- DAILY PERSONALIZED REMINDER (8 AM) ----
+// Except TUESDAY (weekly holiday)
+setInterval(() => {
+  const now = new Date();
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+  const day = now.getDay(); // 0 = Sunday, 2 = Tuesday
+
+  if (hour === 8 && minute === 0 && day !== 2) {
+    const today = now.toLocaleDateString();
+
+    for (let userId in data) {
+      if (data[userId].lastTrained !== today) {
+        bot.sendMessage(
+          GROUP_ID,
+          `👋 Hey <a href="tg://user?id=${userId}">${data[userId].name}</a>, your bros are way ahead! Why not jump in and log your grind? 💪`,
+          { parse_mode: "HTML" }
+        );
+      }
+    }
+  }
+}, 60000);
+
+// ---- WEEKLY LEADERBOARD (Every Tuesday) ----
+setInterval(() => {
+  const now = new Date();
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+  const day = now.getDay(); // 0 = Sunday, 2 = Tuesday
+
+  if (day === 2 && hour === 9 && minute === 0) { // 9 AM on Tuesday
+    let board = "🏆 Weekly Leaderboard:\n\n";
+
+    for (let id in data) {
+      const mins = data[id].week || 0;
+      const hrs = Math.floor(mins / 60);
+      const leftMins = mins % 60;
+
+      board += `👤 ${data[id].name}: ${hrs} hr ${leftMins} min\n`;
+      data[id].week = 0; // reset weekly stats
+    }
+
+    saveData();
+    bot.sendMessage(GROUP_ID, board);
+  }
+}, 60000);
